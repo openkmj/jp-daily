@@ -1,7 +1,7 @@
 // jp-daily service worker — offline shell + web push
 
-const CACHE = "jp-daily-v2";
-const SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
+const CACHE = "jp-daily-v3";
+const SHELL = ["/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -25,6 +25,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
+  // API: network-first, cache as backup for offline
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(
       fetch(req)
@@ -33,11 +34,34 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           return res;
         })
-        .catch(() => caches.match(req).then((r) => r || new Response("offline", { status: 503 }))),
+        .catch(() =>
+          caches
+            .match(req)
+            .then((r) => r || new Response("offline", { status: 503 })),
+        ),
     );
     return;
   }
 
+  // Navigations (HTML pages): network-first so today's lesson never lags
+  if (req.mode === "navigate") {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() =>
+          caches.match(req).then((r) => r || caches.match("/")),
+        ),
+    );
+    return;
+  }
+
+  // Static assets: cache-first
   event.respondWith(
     caches.match(req).then((cached) => {
       if (cached) return cached;
@@ -73,7 +97,8 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || "/";
+  const targetUrl =
+    (event.notification.data && event.notification.data.url) || "/";
   event.waitUntil(
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })

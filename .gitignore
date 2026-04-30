@@ -43,3 +43,6 @@ next-env.d.ts
 
 # omc plugin local state
 .omc/
+
+# personal lesson content (kept locally and on Blob, not in repo)
+/content/drafts/
