@@ -7,6 +7,7 @@ const TABS = [
   { href: "/", label: "오늘", icon: "✺" },
   { href: "/review", label: "복습", icon: "↻" },
   { href: "/library", label: "라이브러리", icon: "≡" },
+  { href: "/settings", label: "설정", icon: "⚙" },
 ];
 
 export function BottomTabs() {
