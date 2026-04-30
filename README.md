@@ -1,36 +1,96 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# jp-daily
 
-## Getting Started
+A Korean-language PWA for daily Japanese practice. One small lesson per day — 3 sentences broken into per-token (jp / 한글 발음 / 뜻) cards, plus a random review across recent months and a flat by-date library. Personal use, phone-first.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Next.js 16 (App Router, Turbopack), React 19, Tailwind v4
+- Vercel Blob for monthly lesson archives (read-only at runtime)
+- Vercel Cron + Web Push for morning study / evening review reminders
+- TypeScript, ESLint flat config
+
+## Architecture
+
+- `app/` — server components fetch a `MonthlyArchive` from Blob and pass into thin client components for state (`TokenizedLessonView`, `ReviewSession`, `LibraryList`).
+- `lib/blob.ts` — read path. `getMonthlyArchive(month)` is `cache()`-memoized per render and uses `next: { revalidate: 3600 }`. The Blob host is derived from `BLOB_READ_WRITE_TOKEN` (parses the store ID), so no separate base URL env. No `list()` calls on the read path.
+- `lib/date.ts` — single source of truth for KST. All date strings are `YYYY-MM-DD`, months are `YYYY-MM`. Lex compare works.
+- `public/sw.js` — service worker: cache-first shell, network-first API, plus push event handler. PWA registers only in production builds.
+- `lib/push.ts` + `lib/send-push.ts` — push subscriptions persist as a single JSON file in Blob (`push/subscriptions.json`). Cron handlers fan out via `web-push` and prune dead endpoints (404/410).
+- `vercel.ts` — pins the framework and registers two crons (09:30 KST morning push, 22:30 KST evening push).
+
+## Data model
+
+```ts
+type Token = { jp: string; pron: string; meaning: string };
+type RichSentence = {
+  tokens: Token[];
+  meaning: string;
+  keyPoints?: string[];
+  audio?: string;
+};
+type RichLesson = { date: string; sentences: RichSentence[] };
+type MonthlyArchive = {
+  version: 1;
+  month: string;
+  lessons: Record<string, RichLesson>;
+};
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Stored at `lessons/YYYY-MM.json` in Vercel Blob. Schema in `lib/schema.ts`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Local development
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+vercel link                  # connect to the existing project
+vercel env pull .env.local   # pulls BLOB_READ_WRITE_TOKEN, VAPID_*, CRON_SECRET
+npm run dev
+```
 
-## Learn More
+`npm run lint` / `npm run build` / `npm run start` as usual. There is no test suite.
 
-To learn more about Next.js, take a look at the following resources:
+## Content pipeline
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The lesson archives are not generated at runtime. The flow is:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. `content/curriculum.yaml` — month-by-month plan (theme, week breakdown, grammar focus, target new-vocab count).
+2. `content/prompts/writer-instructions.md` — the system prompt used by the writer subagents (schema, tokenization rules, style).
+3. AI subagents produce `content/drafts/YYYY-MM.json` per month, validated against the schema.
+4. `node scripts/upload-sample.mjs <draft>` uploads one month, or `node scripts/sync-blob.mjs` wipes `lessons/*` and re-uploads all drafts in `content/drafts/`.
 
-## Deploy on Vercel
+The April 2026 sample (`scripts/sample-2026-04.json` ↔ now superseded by `content/drafts/`) exists only as a stylistic seed for the writer.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Push notifications
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Web Push via VAPID, single subscription file in Blob (multi-device append, dedupe by endpoint). The settings tab (`/settings`) registers / unsubscribes the current device. iOS only delivers push to PWAs added to the home screen.
+
+Cron schedules (in UTC):
+
+| Schedule         | Endpoint                    | KST    |
+| ---------------- | --------------------------- | ------ |
+| `30 0 * * *`     | `/api/cron/morning-push`    | 09:30  |
+| `30 13 * * *`    | `/api/cron/evening-push`    | 22:30  |
+
+Both routes require `Authorization: Bearer ${CRON_SECRET}` and call `lib/send-push.ts:broadcast`. To test manually:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" https://jp-daily.vercel.app/api/cron/morning-push
+```
+
+## Environment
+
+| Variable                          | Where         | Purpose                                        |
+| --------------------------------- | ------------- | ---------------------------------------------- |
+| `BLOB_READ_WRITE_TOKEN`           | server + script | Blob auth + Blob host derivation              |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`    | client + server | Subscribe button, server signs notifications  |
+| `VAPID_PRIVATE_KEY`               | server        | Sign push payloads                             |
+| `VAPID_SUBJECT`                   | server        | `mailto:` or `https:` URL for VAPID            |
+| `CRON_SECRET`                     | server        | Auth bearer for cron-triggered routes          |
+
+## Deploy
+
+```bash
+vercel --prod
+```
+
+Production is `https://jp-daily.vercel.app`.
