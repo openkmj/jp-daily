@@ -1,5 +1,6 @@
 "use client";
 
+import { AudioPlayButton } from "@/components/AudioPlayButton";
 import { SentenceBlock } from "@/components/SentenceBlock";
 import type { RichSentence } from "@/lib/schema";
 
@@ -14,8 +15,14 @@ export function SentenceCard({
 }) {
   return (
     <div
-      className={`overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${className}`}
+      className={`relative overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${className}`}
     >
+      {sentence.audio ? (
+        <AudioPlayButton
+          url={sentence.audio}
+          className="absolute top-3 right-3 z-10"
+        />
+      ) : null}
       <div className="p-6">
         <SentenceBlock sentence={sentence} revealed={revealed} />
       </div>
