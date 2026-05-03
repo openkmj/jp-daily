@@ -1,22 +1,25 @@
 # jp-daily
 
-A Korean-language PWA for daily Japanese practice. One small lesson per day — 3 sentences broken into per-token (jp / 한글 발음 / 뜻) cards, plus a random review across recent months and a flat by-date library. Personal use, phone-first.
+A Korean-language PWA for daily Japanese practice. One small lesson per day — 3 sentences broken into per-token (jp / 한글 발음 / 뜻) cards with TTS audio, plus a random review across recent months and a flat by-date library. Personal use, phone-first.
+
+Four bottom tabs: `/` (오늘), `/review` (복습), `/library` (라이브러리), `/settings` (설정).
 
 ## Stack
 
 - Next.js 16 (App Router, Turbopack), React 19, Tailwind v4
-- Vercel Blob for monthly lesson archives (read-only at runtime)
+- Vercel Blob for monthly lesson archives + per-sentence audio (read-only at runtime)
 - Vercel Cron + Web Push for morning study / evening review reminders
 - TypeScript, ESLint flat config
 
 ## Architecture
 
-- `app/` — server components fetch a `MonthlyArchive` from Blob and pass into thin client components for state (`TokenizedLessonView`, `ReviewSession`, `LibraryList`).
+- `app/` — server components fetch a `MonthlyArchive` from Blob and pass into thin client components for state (`TokenizedLessonView`, `ReviewSession`, `LibraryList`). `SentenceCard` overlays an `AudioPlayButton` when `sentence.audio` is set.
 - `lib/blob.ts` — read path. `getMonthlyArchive(month)` is `cache()`-memoized per render and uses `next: { revalidate: 3600 }`. The Blob host is derived from `BLOB_READ_WRITE_TOKEN` (parses the store ID), so no separate base URL env. No `list()` calls on the read path.
 - `lib/date.ts` — single source of truth for KST. All date strings are `YYYY-MM-DD`, months are `YYYY-MM`. Lex compare works.
-- `public/sw.js` — service worker: cache-first shell, network-first API, plus push event handler. PWA registers only in production builds.
+- `public/sw.js` — service worker: network-first for navigations and `/api/*`, cache-first for static, plus push event handler. PWA registers only in production builds. Cache name is versioned (`jp-daily-vN`) — bump it when changing cached assets.
 - `lib/push.ts` + `lib/send-push.ts` — push subscriptions persist as a single JSON file in Blob (`push/subscriptions.json`). Cron handlers fan out via `web-push` and prune dead endpoints (404/410).
 - `vercel.ts` — pins the framework and registers two crons (09:30 KST morning push, 22:30 KST evening push).
+- Audio files live in the same Blob store; URLs are embedded into the archive's `sentence.audio` and played client-side via `<audio>`.
 
 ## Data model
 
@@ -49,16 +52,9 @@ npm run dev
 
 `npm run lint` / `npm run build` / `npm run start` as usual. There is no test suite.
 
-## Content pipeline
+## Content
 
-The lesson archives are not generated at runtime. The flow is:
-
-1. `content/curriculum.yaml` — month-by-month plan (theme, week breakdown, grammar focus, target new-vocab count).
-2. `content/prompts/writer-instructions.md` — the system prompt used by the writer subagents (schema, tokenization rules, style).
-3. AI subagents produce `content/drafts/YYYY-MM.json` per month, validated against the schema.
-4. `node scripts/upload-sample.mjs <draft>` uploads one month, or `node scripts/sync-blob.mjs` wipes `lessons/*` and re-uploads all drafts in `content/drafts/`.
-
-The April 2026 sample (`scripts/sample-2026-04.json` ↔ now superseded by `content/drafts/`) exists only as a stylistic seed for the writer.
+Archives are generated offline, not at runtime, and uploaded to Blob via local scripts (`scripts/`). Drafts live in `content/drafts/` and are gitignored; `scripts/sample-2026-04.json` is checked in as a stylistic seed and schema example. `content/curriculum.yaml` and `content/prompts/` capture the writer plan and prompts.
 
 ## Push notifications
 
