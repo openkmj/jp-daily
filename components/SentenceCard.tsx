@@ -20,6 +20,7 @@ export function SentenceCard({
       {sentence.audio ? (
         <AudioPlayButton
           url={sentence.audio}
+          autoPlay={revealed}
           className="absolute top-3 right-3 z-10"
         />
       ) : null}

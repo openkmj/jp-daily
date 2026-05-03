@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 
 export function AudioPlayButton({
   url,
+  autoPlay = false,
   className = "",
 }: {
   url?: string;
+  autoPlay?: boolean;
   className?: string;
 }) {
   const [playing, setPlaying] = useState(false);
@@ -30,6 +32,11 @@ export function AudioPlayButton({
       .then(() => setPlaying(true))
       .catch(() => setPlaying(false));
   };
+
+  useEffect(() => {
+    if (autoPlay) play();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPlay]);
 
   useEffect(() => {
     return () => {
